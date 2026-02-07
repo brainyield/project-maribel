@@ -148,21 +148,21 @@ try {
 
 **The Assumption:** The admin UI uses `VITE_SUPABASE_MARIBEL_SERVICE_KEY` directly in the browser Supabase client. The service role key bypasses all Row Level Security.
 
-**Why It's Risky:** If anyone accesses the `/maribel` routes (even through your existing app's auth), they have unrestricted database access to all Maribel tables. This is fine if and only if:
-- Your existing app has authentication that prevents unauthorized access to `/maribel` routes
-- Only you (Ivan) can reach those routes
+**Why It's Risky:** If anyone can access the admin UI, they have unrestricted database access to all Maribel tables. This is acceptable if and only if:
+- The admin UI app has its own authentication gate
+- Only Ivan can access it
 
 **Resolution Type:** `VALIDATE DURING BUILD`
 
-**Applies To Phase:** Phase 6 (Admin UI)
+**Applies To Phase:** Phase 6 (Admin UI — standalone app)
 
 **Fix — Choose one of these approaches:**
 
-**Option A (simplest, recommended for now):** Keep the service key but add a route guard. Your existing app presumably has auth. Make sure the `/maribel` routes are behind it. Claude Code should wrap the Maribel route group in whatever auth guard your app already uses.
+**Option A (simplest, recommended for now):** Keep the service key but add a simple auth gate to the standalone app. Since Ivan is the only user, a password check on app load is sufficient. Store the password hash in an environment variable. The app should be deployed to a private URL or behind basic auth.
 
-**Option B (more secure, recommended if you ever add team members):** Use the anon key instead of the service key, and implement RLS policies on all Maribel tables. This is more work but means a compromised browser session only has access to what RLS allows. This can be a V2 improvement.
+**Option B (more secure, recommended if you ever add team members):** Use the anon key instead of the service key, and implement RLS policies on all Maribel tables. This is more work but means a compromised browser session only has access to what RLS allows. This can be a future improvement.
 
-**For now, go with Option A.** Add this note to the Phase 6 prompt for Claude Code: "Wrap all `/maribel` routes in the existing app's authentication guard. Only authenticated admin users should be able to access these routes."
+**For now, go with Option A.** The standalone admin app needs its own auth gate — even a simple one — since it's not behind any existing app's authentication.
 
 ---
 
@@ -266,22 +266,13 @@ The comment webhook payload is significantly different from the DM webhook paylo
 
 ---
 
-## 🟡 A9 — Admin UI Tech Stack
+## ~~🟡 A9 — Admin UI Tech Stack~~ (RESOLVED — No Longer Applicable)
 
-**The Assumption:** The spec assumes the existing app uses React 19, TypeScript 5.9, Vite, Tailwind (dark theme), TanStack Query v5, React Router v7, and Lucide React.
+**The Assumption:** The spec originally assumed the admin UI would integrate into the existing eaton-console app, requiring Claude Code to match its tech stack.
 
-**Resolution Type:** `VALIDATE DURING BUILD`
+**Resolution:** The admin UI is now a **standalone app** (separate from eaton-console). Claude Code scaffolds it from scratch with its own tech choices: Vite + React 19 + TypeScript + Tailwind + TanStack Query + React Router + Lucide React. No need to inspect or match an existing app's patterns.
 
-**Applies To Phase:** Phase 6 (Admin UI)
-
-**Fix:** Before Claude Code starts the admin UI build, it should:
-1. Inspect the existing app's `package.json` for actual dependency versions
-2. Check the existing router setup (file-based vs config-based routes)
-3. Check the existing Supabase client pattern (how it's initialized, where it lives)
-4. Check whether TanStack Query is already configured with a QueryClient provider
-5. Match component patterns (does the app use a specific component library? shadcn/ui? custom components?)
-
-Claude Code should adapt the admin UI components to match whatever it finds, not what the spec assumes.
+**This assumption no longer applies.**
 
 ---
 
@@ -430,7 +421,7 @@ Then reference it in Node 12 instead of hardcoding LIMIT 15. This lets you tune 
 | A1 | 🔴 | Advisory locks | Replace with row-level lock table in Migration 016 |
 | A2 | 🔴 | `fetch()` in Code nodes | Test early; replace with HTTP Request nodes if needed |
 | A3 | 🔴 | Calendly booking API | Confirm endpoint paths and required fields from live docs |
-| A4 | 🟡 | Service key in browser | Wrap `/maribel` routes in auth guard |
+| A4 | 🟡 | Service key in browser | Add simple auth gate to standalone admin app |
 | A5 | 🟡 | Booking state management | Add `booking_state` column to `ig_leads` |
 | A7 | 🟡 | HUMAN_AGENT tag | Add conditional tag to post-escalation send requests |
 | A14 | 🟢 | History limit hardcoded | Add `conversation_history_limit` to `agent_config` |

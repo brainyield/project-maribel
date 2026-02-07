@@ -17,7 +17,7 @@
 8. [Phase 3: AGENTS.md — Maribel's Brain](#8-phase-3-agentsmd--maribels-brain)
 9. [Phase 4: Comment-to-DM Funnels](#9-phase-4-comment-to-dm-funnels)
 10. [Phase 5: Monitoring & Alerts](#10-phase-5-monitoring--alerts)
-11. [Phase 6: Admin UI Module](#11-phase-6-admin-ui-module)
+11. [Phase 6: Admin UI (Standalone App)](#11-phase-6-admin-ui-standalone-app)
 12. [Testing Plan](#12-testing-plan)
 13. [Environment Variables & Secrets](#13-environment-variables--secrets)
 14. [Deployment Checklist](#14-deployment-checklist)
@@ -351,21 +351,21 @@ TELEGRAM INLINE RESOLUTION:
 ### Admin UI Architecture
 
 ```
-ADMIN UI (integrated into existing React app):
+ADMIN UI (standalone app — separate from eaton-console):
 ═══════════════════════════════════════════════════════════════
 
-Existing App (React 19 + TypeScript + Vite + Tailwind)
+Standalone App (Vite + React 19 + TypeScript + Tailwind)
 │
-├── /maribel (new route group)
-│   ├── /maribel/dashboard      → Analytics dashboard
-│   ├── /maribel/escalations    → Escalation management
-│   ├── /maribel/leads          → Lead pipeline view
-│   ├── /maribel/knowledge      → Knowledge base editor
-│   ├── /maribel/config         → Agent config management
-│   └── /maribel/kill-switch    → Auto-reply toggle
+├── /                          → Analytics dashboard
+├── /escalations               → Escalation management
+├── /leads                     → Lead pipeline view
+├── /leads/:senderId           → Lead detail + conversation
+├── /knowledge                 → Knowledge base editor
+├── /config                    → Agent config management
 │
-│   All components query Supabase (maribel-agent project)
-│   via the existing app's Supabase client + TanStack Query
+│   Own Supabase client → maribel-agent project
+│   Own auth gate (password-based, Ivan only)
+│   Own deployment (Vercel/Netlify)
 │
 └── Supabase RPC functions for complex queries
     (analytics aggregations, lead pipeline, etc.)
@@ -484,22 +484,6 @@ project-maribel/
 │   ├── chunking-guide.md             # ★ How knowledge files are chunked for RAG
 │   └── README.md                      # How to update the knowledge base
 │
-├── admin-ui/
-│   ├── components/
-│   │   ├── MaribelDashboard.tsx       # Analytics dashboard
-│   │   ├── EscalationManager.tsx      # Escalation queue + resolution
-│   │   ├── LeadPipeline.tsx           # Lead pipeline view
-│   │   ├── KnowledgeEditor.tsx        # Knowledge base CRUD + re-embed
-│   │   ├── AgentConfigEditor.tsx      # agent_config management
-│   │   ├── KillSwitch.tsx             # Auto-reply toggle
-│   │   └── ConversationViewer.tsx     # Full conversation history modal
-│   ├── hooks/
-│   │   ├── useMaribelData.ts          # TanStack Query hooks for Supabase
-│   │   └── useMaribelActions.ts       # Mutation hooks (resolve, update, etc.)
-│   ├── types/
-│   │   └── maribel.ts                 # TypeScript types for all Maribel data
-│   └── README.md                      # Admin UI integration guide
-│
 ├── scripts/
 │   ├── test_webhook_verification.sh   # Curl command to test webhook handshake
 │   ├── test_send_dm.sh                # Curl command to test sending a DM
@@ -539,7 +523,7 @@ Claude Code should build in this exact sequence:
     i. Conversation summarizer workflow (Workflow 6)
     j. Knowledge re-embedder workflow (Workflow 7)
 8.  Create SETUP.md with Meta App setup guide (Phase 0)
-9.  Create admin-ui/ components and hooks
+9.  Admin UI is a separate standalone project (not built inside this repo)
 10. Create docs/ files
 11. Create scripts/ files
 12. Export n8n workflows as JSON to n8n/workflows/ for version control
@@ -2628,56 +2612,63 @@ When Maribel escalates a conversation:
 
 ---
 
-## 11. Phase 6: Admin UI Module
+## 11. Phase 6: Admin UI (Standalone App)
 
-> **This is NOT a standalone app.** It integrates into Ivan's existing business-management application as a new route group under `/maribel`.
+> **The admin UI is a standalone application** — it is NOT integrated into the existing eaton-console business management app. It has its own project setup, routing, authentication, and deployment. This keeps Maribel's entire system self-contained and decoupled.
 
-### Existing App Tech Stack
-- React 19 + TypeScript 5.9
-- Vite — dev server and build tool
-- TailwindCSS — styling (dark theme)
-- Supabase — database and auth
-- TanStack React Query v5 — server state management
-- React Router v7 — routing
-- Lucide React — icons
-- Additional libraries: jsPDF, integrations with Gmail, Mailchimp, n8n
+### Why Standalone?
+- Decoupled deployment — update Maribel's UI without risking the main business app
+- Maribel already has its own Supabase project — adding a second client to eaton-console adds unnecessary complexity
+- Different update cadence — Maribel needs rapid iteration in early weeks
+- Risk isolation — a bug in a Maribel component can't break enrollment management
 
-### Integration Pattern
+### Tech Stack
+- Vite + React 19 + TypeScript
+- TailwindCSS (dark theme)
+- TanStack React Query v5
+- React Router v7
+- Lucide React (icons)
+- Recharts (dashboard charts)
+- Supabase JS client (connects to maribel-agent project)
 
-The admin UI connects to the **Maribel Supabase project** (not the existing Eaton Supabase project). Add a second Supabase client instance in the existing app:
+### Authentication
+For launch, a simple password-based auth gate is sufficient — Ivan is the only user. The app checks a password on load and stores the session in memory. Can be upgraded to Supabase Auth later if team members are added.
+
+### Route Structure
+
+```
+/                    → MaribelDashboard (analytics, kill switch)
+/escalations         → EscalationManager (queue + resolution)
+/leads               → LeadPipeline (filterable table)
+/leads/:senderId     → LeadDetail (full conversation + lead info)
+/knowledge           → KnowledgeEditor (CRUD + re-embed)
+/config              → AgentConfigEditor (all settings)
+```
+
+### Environment Variables
+
+```bash
+VITE_SUPABASE_MARIBEL_URL=           # Maribel Supabase project URL
+VITE_SUPABASE_MARIBEL_SERVICE_KEY=   # Maribel Supabase service role key
+VITE_ADMIN_PASSWORD_HASH=            # Hashed password for auth gate
+VITE_N8N_BASE_URL=https://eatonacademic.app.n8n.cloud  # For re-embed webhook calls
+```
+
+### Supabase Client
 
 ```typescript
-// lib/supabase-maribel.ts
+// lib/supabase.ts
 import { createClient } from '@supabase/supabase-js';
 
-export const supabaseMaribel = createClient(
+export const supabase = createClient(
   import.meta.env.VITE_SUPABASE_MARIBEL_URL,
   import.meta.env.VITE_SUPABASE_MARIBEL_SERVICE_KEY
 );
 ```
 
-### Route Structure
-
-Add to the existing React Router configuration:
-
-```typescript
-// Inside existing router config
-{
-  path: '/maribel',
-  children: [
-    { index: true, element: <MaribelDashboard /> },
-    { path: 'escalations', element: <EscalationManager /> },
-    { path: 'leads', element: <LeadPipeline /> },
-    { path: 'leads/:senderId', element: <LeadDetail /> },
-    { path: 'knowledge', element: <KnowledgeEditor /> },
-    { path: 'config', element: <AgentConfigEditor /> },
-  ]
-}
-```
-
 ### Component Specifications
 
-#### 1. MaribelDashboard (`/maribel`)
+#### 1. MaribelDashboard (`/`)
 
 **Purpose:** Analytics overview with key metrics and charts.
 
@@ -2700,17 +2691,17 @@ Add to the existing React Router configuration:
 // TanStack Query hooks
 const { data: weeklyStats } = useQuery({
   queryKey: ['maribel', 'analytics', 'week'],
-  queryFn: () => supabaseMaribel.rpc('get_analytics_summary', { p_period: 'week' })
+  queryFn: () => supabase.rpc('get_analytics_summary', { p_period: 'week' })
 });
 
 const { data: openEscalations } = useQuery({
   queryKey: ['maribel', 'escalations', 'open'],
-  queryFn: () => supabaseMaribel.rpc('get_escalation_queue')
+  queryFn: () => supabase.rpc('get_escalation_queue')
 });
 
 const { data: killSwitch } = useQuery({
   queryKey: ['maribel', 'config', 'auto_reply_enabled'],
-  queryFn: () => supabaseMaribel
+  queryFn: () => supabase
     .from('agent_config')
     .select('value')
     .eq('key', 'auto_reply_enabled')
@@ -2718,7 +2709,7 @@ const { data: killSwitch } = useQuery({
 });
 ```
 
-#### 2. EscalationManager (`/maribel/escalations`)
+#### 2. EscalationManager (`/escalations`)
 
 **Purpose:** View and resolve open escalations with full conversation context.
 
@@ -2743,7 +2734,7 @@ const { data: killSwitch } = useQuery({
 ```typescript
 const resolveEscalation = useMutation({
   mutationFn: ({ escalationId, notes }: { escalationId: number; notes: string }) =>
-    supabaseMaribel.rpc('resolve_escalation', {
+    supabase.rpc('resolve_escalation', {
       p_escalation_id: escalationId,
       p_resolved_by: 'ivan_admin_ui',
       p_notes: notes
@@ -2752,7 +2743,7 @@ const resolveEscalation = useMutation({
 });
 ```
 
-#### 3. LeadPipeline (`/maribel/leads`)
+#### 3. LeadPipeline (`/leads`)
 
 **Purpose:** CRM-lite view of all leads with filtering and drill-down.
 
@@ -2770,7 +2761,7 @@ const resolveEscalation = useMutation({
 ```typescript
 const { data: leads } = useQuery({
   queryKey: ['maribel', 'leads', filters],
-  queryFn: () => supabaseMaribel.rpc('get_lead_pipeline', {
+  queryFn: () => supabase.rpc('get_lead_pipeline', {
     p_score_filter: filters.score || null,
     p_status_filter: filters.status || null,
     p_date_from: filters.dateFrom || null,
@@ -2781,7 +2772,7 @@ const { data: leads } = useQuery({
 });
 ```
 
-#### 4. KnowledgeEditor (`/maribel/knowledge`)
+#### 4. KnowledgeEditor (`/knowledge`)
 
 **Purpose:** CRUD interface for knowledge base chunks with re-embedding triggers.
 
@@ -2804,17 +2795,17 @@ const { data: leads } = useQuery({
 // Create chunk
 const createChunk = useMutation({
   mutationFn: (chunk: NewKnowledgeChunk) =>
-    supabaseMaribel.from('knowledge_chunks').insert(chunk).select().single(),
+    supabase.from('knowledge_chunks').insert(chunk).select().single(),
   onSuccess: (data) => {
     // Log version
-    supabaseMaribel.from('knowledge_versions').insert({
+    supabase.from('knowledge_versions').insert({
       chunk_id: data.data.id,
       action: 'create',
       new_content: data.data.content,
       changed_by: 'admin_ui'
     });
     // Trigger re-embed for this chunk
-    fetch('https://eatonacademic.app.n8n.cloud/webhook/reembed-knowledge', {
+    fetch(`${import.meta.env.VITE_N8N_BASE_URL}/webhook/reembed-knowledge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chunk_ids: [data.data.id] })
@@ -2824,7 +2815,7 @@ const createChunk = useMutation({
 });
 ```
 
-#### 5. AgentConfigEditor (`/maribel/config`)
+#### 5. AgentConfigEditor (`/config`)
 
 **Purpose:** Edit all `agent_config` settings without touching Supabase directly.
 
@@ -2853,7 +2844,7 @@ const createChunk = useMutation({
 - Large toggle switch prominently displayed on the dashboard
 - Current state indicator: "Maribel is ACTIVE" (green) or "Maribel is PAUSED" (red)
 - Confirmation dialog: "Are you sure you want to disable Maribel? All incoming DMs will be received but not responded to automatically."
-- When disabled, show a banner across all /maribel pages: "Auto-reply is currently DISABLED"
+- When disabled, show a banner across all pages: "Auto-reply is currently DISABLED"
 
 #### 7. ConversationViewer (shared component)
 
@@ -3106,12 +3097,14 @@ TELEGRAM_BOT_TOKEN=                   # From BotFather
 TELEGRAM_CHAT_ID=                     # Ivan's Telegram user ID
 ```
 
-### Additional Environment Variables for Admin UI
+### Environment Variables for Admin UI (Standalone App)
 
 ```bash
-# Add to existing app's .env
+# In the standalone admin UI app's own .env
 VITE_SUPABASE_MARIBEL_URL=           # Maribel Supabase project URL
 VITE_SUPABASE_MARIBEL_SERVICE_KEY=   # Maribel Supabase service role key
+VITE_ADMIN_PASSWORD_HASH=            # Hashed password for auth gate
+VITE_N8N_BASE_URL=https://eatonacademic.app.n8n.cloud  # For webhook calls (re-embed, etc.)
 ```
 
 ### `.env.example` for the repo
@@ -3177,7 +3170,7 @@ BUILD (Claude Code)
 [ ] Create n8n Workflow 6: Conversation Summarizer
 [ ] Create n8n Workflow 7: Knowledge Re-embedder
 [ ] Set Workflow 9 as error workflow for all other workflows
-[ ] Create admin-ui/ components and hooks
+[ ] Admin UI is a separate standalone project (not built inside this repo)
 [ ] Write SETUP.md
 [ ] Write docs/meta-app-review-guide.md
 [ ] Write docs/conversation-flow-examples.md

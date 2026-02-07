@@ -20,6 +20,7 @@
 | Enrollment Data | Supabase (existing Eaton Academic project, read-only) |
 | Appointment Booking | Calendly API (proactive slot booking + fallback link) |
 | Escalation | Telegram Bot API (inline keyboard buttons) |
+| Admin UI | Standalone Vite + React + TypeScript + Tailwind app (separate from eaton-console) |
 | Source Control | GitHub (`project-maribel`) |
 
 ---
@@ -41,6 +42,8 @@
 7. **All configurable values** come from the `agent_config` table — nothing is hardcoded in workflows.
 
 8. **Meta webhook deduplication** via `message_mid` unique index must happen before ANY processing.
+
+9. **Admin UI is a standalone app** — NOT integrated into the existing eaton-console business management app. It is its own Vite + React + TypeScript + Tailwind project with its own routing, auth, and deployment. This keeps Maribel's entire system self-contained and decoupled from the main business app. The standalone app connects directly to the `maribel-agent` Supabase project.
 
 ---
 
@@ -89,5 +92,5 @@ The Calendly booking flow uses `ig_leads.booking_state` for durable state tracki
 - Phase 3: ⬜ Knowledge base + RAG ingestion
 - Phase 4: ⬜ Core n8n workflows (DM handler, error handler, Telegram callback)
 - Phase 5: ⬜ Secondary workflows (Comment-to-DM, analytics, summarizer, etc.)
-- Phase 6: ⬜ Admin UI components
+- Phase 6: ⬜ Admin UI (standalone app)
 - Phase 7: ⬜ Docs, scripts, testing, hardening

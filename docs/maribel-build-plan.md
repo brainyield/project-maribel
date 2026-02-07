@@ -14,7 +14,7 @@
 | **3** | Knowledge base + RAG ingestion | Medium | Phase 2 |
 | **4** | Core n8n workflows (DM handler + supporting) | Heavy | Phases 2, 3 |
 | **5** | Comment-to-DM + secondary workflows | Medium | Phase 4 |
-| **6** | Admin UI components | Medium | Phase 2 |
+| **6** | Admin UI (standalone app) | Medium | Phase 2 |
 | **7** | Docs, scripts, testing, hardening | Medium | All above |
 
 ---
@@ -53,7 +53,7 @@ project-maribel/
 - .gitignore (Node, Python, .env)
 - .env.example with all required variables (from spec Section 13)
 - SETUP.md (complete Meta Platform setup guide from spec Section 5)
-- Empty directory structure for all folders (supabase/, n8n/, knowledge-base/, admin-ui/, scripts/, docs/)
+- Empty directory structure for all folders (supabase/, n8n/, knowledge-base/, scripts/, docs/)
 - docs/project-maribel-spec-v2.md (the full spec, committed to repo)
 - docs/maribel-assumptions-resolution.md (assumptions guide, committed to repo)
 - docs/maribel-build-plan.md (this file, committed to repo)
@@ -80,7 +80,6 @@ I'm going to give you the contents of three reference documents that need to be 
    - supabase/migrations/
    - n8n/workflows/
    - knowledge-base/
-   - admin-ui/components/, admin-ui/hooks/, admin-ui/types/
    - scripts/
    - docs/
 
@@ -109,6 +108,7 @@ I'm going to give you the contents of three reference documents that need to be 
    - Two Supabase projects: `maribel-agent` (dedicated, all Maribel tables) and the existing Eaton Academic project (read-only lookups)
    - Calendly booking state is tracked durably in `ig_leads.booking_state` column, not just via Claude's metadata
    - All configurable values come from the `agent_config` table — nothing is hardcoded in workflows
+   - Admin UI is a standalone Vite + React + TypeScript + Tailwind app — NOT integrated into the existing eaton-console business management app. Separate repo/project, own routing, own auth, own deployment.
 
    **Critical Assumption Fixes (always apply these):**
    - A1: NEVER use advisory locks (pg_try_advisory_lock). Always use the conversation_locks table with acquire/release RPC functions.
@@ -135,7 +135,7 @@ I'm going to give you the contents of three reference documents that need to be 
    - Phase 3: ⬜ Knowledge base + RAG
    - Phase 4: ⬜ Core n8n workflows
    - Phase 5: ⬜ Secondary workflows
-   - Phase 6: ⬜ Admin UI
+   - Phase 6: ⬜ Admin UI (standalone app)
    - Phase 7: ⬜ Docs, scripts, testing
 
 5. Create SETUP.md with the complete step-by-step Meta Platform setup guide. I've never created a Meta Developer App before, so make this beginner-friendly. Cover:
@@ -473,75 +473,81 @@ After completion, update CLAUDE.md build status: Phase 5 ✅.
 
 ---
 
-## Phase 6 — Admin UI Components
+## Phase 6 — Admin UI (Standalone App)
 
-**Goal:** Build all admin UI React components that integrate into Ivan's existing business management app.
+**Goal:** Scaffold and build a standalone admin UI application for managing Maribel. This is a separate project from eaton-console — it has its own Vite config, routing, auth, and deployment.
 
 **What gets built:**
-- lib/supabase-maribel.ts (second Supabase client)
+- New Vite + React 19 + TypeScript + Tailwind project (scaffolded from scratch)
+- Simple auth gate (password-based or Supabase auth — just needs to keep the app private)
+- Supabase client configured for the maribel-agent project
 - types/maribel.ts (TypeScript interfaces)
-- hooks/useMaribelData.ts (TanStack Query hooks)
-- hooks/useMaribelActions.ts (mutation hooks)
-- MaribelDashboard.tsx
-- EscalationManager.tsx
-- LeadPipeline.tsx
-- KnowledgeEditor.tsx
-- AgentConfigEditor.tsx
-- KillSwitch.tsx (integrated into dashboard)
-- ConversationViewer.tsx (shared component)
-- Route configuration for /maribel/*
+- TanStack Query hooks for all read/write operations
+- MaribelDashboard (analytics cards, charts, kill switch toggle, recent escalations)
+- EscalationManager (queue, resolution, conversation viewer)
+- LeadPipeline (filterable table, drill-down, conversation history)
+- KnowledgeEditor (CRUD table, re-embed buttons, version history)
+- AgentConfigEditor (grouped settings, system prompt editor)
+- ConversationViewer (shared chat-style component)
+- React Router configuration for all routes
 
 **Assumptions to apply:**
-- **A4:** Wrap all /maribel routes in the existing app's auth guard
-- **A9:** Inspect the existing app's package.json and patterns before building
+- **A4:** The app needs its own authentication — even a simple password gate is fine for now since only Ivan uses it. Can upgrade to Supabase Auth later if team members are added.
 
 **Exit criteria:**
+- [ ] Standalone Vite app scaffolded and runs locally
+- [ ] Auth gate prevents unauthenticated access
+- [ ] Supabase client connects to maribel-agent project
 - [ ] All components created and TypeScript-clean
-- [ ] Second Supabase client initialized for Maribel project
-- [ ] Routes added under /maribel with auth guard
 - [ ] Dashboard shows real data from Supabase
 - [ ] Escalation manager can resolve escalations
 - [ ] Lead pipeline has filtering and drill-down
 - [ ] Knowledge editor CRUD works with re-embed trigger
 - [ ] Config editor can update agent_config values
 - [ ] Kill switch toggles auto_reply_enabled
+- [ ] App is deployable (Vercel, Netlify, or similar)
 
 **Prompt for Claude Code:**
 
 ```
-We're on PHASE 6: Admin UI Components.
+We're on PHASE 6: Admin UI (Standalone App).
 
 Read these files first:
 - docs/project-maribel-spec-v2.md — Section 11 (Phase 6: Admin UI Module)
-- docs/maribel-assumptions-resolution.md — Items A4 (service key security) and A9 (tech stack verification)
+- docs/maribel-assumptions-resolution.md — Item A4 (service key security)
 
-BEFORE writing any code, inspect the existing app:
-1. Check package.json for actual dependency versions (React, TypeScript, TanStack Query, React Router, Tailwind, etc.)
-2. Check how the existing Supabase client is configured (file location, initialization pattern)
-3. Check the existing routing setup (React Router config location, auth guard pattern)
-4. Check if TanStack Query's QueryClientProvider is already set up
-5. Look at existing component patterns (naming conventions, file structure, any component library in use)
+IMPORTANT ARCHITECTURAL DECISION: The admin UI is a STANDALONE application, NOT integrated into the existing eaton-console app. Build it as its own project from scratch.
 
-ASSUMPTION FIX A4: Wrap all /maribel routes in whatever authentication guard the existing app uses. Only authenticated admin users should access these routes.
+Scaffold the app:
+1. Create a new Vite + React 19 + TypeScript project.
+2. Install dependencies: @supabase/supabase-js, @tanstack/react-query, react-router-dom, tailwindcss, lucide-react, recharts (for dashboard charts).
+3. Configure Tailwind with a dark theme.
+4. Set up React Router with routes:
+   - / → Dashboard
+   - /escalations → EscalationManager
+   - /leads → LeadPipeline
+   - /leads/:senderId → LeadDetail
+   - /knowledge → KnowledgeEditor
+   - /config → AgentConfigEditor
+5. Add a simple auth gate — a password check on app load is sufficient for now (Ivan is the only user). Store the password hash in an env var. This can be upgraded to Supabase Auth later.
+6. Create .env with VITE_SUPABASE_MARIBEL_URL and VITE_SUPABASE_MARIBEL_SERVICE_KEY.
 
-ASSUMPTION FIX A9: Adapt all components to match the existing app's actual tech stack and patterns — not what the spec assumes. If the app uses different versions or patterns, match them.
+ASSUMPTION FIX A4: The service key is acceptable here since only Ivan accesses the app and it's behind an auth gate. If team members are added later, switch to Supabase Auth + RLS.
 
-Now build from spec Section 11:
-
-1. Create lib/supabase-maribel.ts — Second Supabase client for the Maribel project.
-2. Create types/maribel.ts — All TypeScript interfaces from the spec.
-3. Create hooks/useMaribelData.ts — TanStack Query hooks for all read operations.
-4. Create hooks/useMaribelActions.ts — Mutation hooks for write operations.
-5. Create all components:
+Now build all components from spec Section 11:
+1. lib/supabase.ts — Supabase client for the maribel-agent project.
+2. types/maribel.ts — All TypeScript interfaces from the spec.
+3. hooks/useMaribelData.ts — TanStack Query hooks for all read operations.
+4. hooks/useMaribelActions.ts — Mutation hooks for write operations.
+5. All page components:
    - MaribelDashboard (analytics cards, charts, kill switch toggle, recent escalations)
    - EscalationManager (queue, resolution, conversation viewer)
    - LeadPipeline (filterable table, drill-down, conversation history)
    - KnowledgeEditor (CRUD table, re-embed buttons, version history)
    - AgentConfigEditor (grouped settings, system prompt editor)
-   - ConversationViewer (shared chat-style component)
-6. Add routes to the existing router configuration under /maribel, wrapped in the app's auth guard.
+   - ConversationViewer (shared chat-style component used by escalations and leads)
 
-Use the existing app's styling conventions. Match existing component patterns.
+Use a clean, dark-themed UI. This is an internal admin tool — prioritize clarity and function over polish.
 
 After completion, update CLAUDE.md build status: Phase 6 ✅.
 ```
