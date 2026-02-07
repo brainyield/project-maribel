@@ -88,7 +88,7 @@ The Calendly booking flow uses `ig_leads.booking_state` for durable state tracki
 
 - Phase 0: ✅ Complete (repo scaffold, CLAUDE.md, reference docs)
 - Phase 1: ⬜ Ivan's manual setup (Meta App, Telegram bot, API keys, Supabase project)
-- Phase 2: ⬜ Supabase schema + migrations
+- Phase 2: ✅ Supabase schema + migrations (17 migrations applied, A1/A5/A14 fixes included)
 - Phase 3: ⬜ Knowledge base + RAG ingestion
 - Phase 4: ⬜ Core n8n workflows (DM handler, error handler, Telegram callback)
 - Phase 5: ⬜ Secondary workflows (Comment-to-DM, analytics, summarizer, etc.)
