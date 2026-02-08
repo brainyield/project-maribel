@@ -47,7 +47,8 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
-# MCP config (contains service keys)
+# Claude Code
+.claude/
 .mcp.json
 
 # Task files
