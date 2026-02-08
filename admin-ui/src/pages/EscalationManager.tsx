@@ -5,15 +5,6 @@ import { useResolveEscalation } from '../hooks/useMaribelActions';
 import { ConversationViewer } from '../components/ConversationViewer';
 import type { Escalation } from '../types/maribel';
 
-const SCORE_STYLES: Record<string, string> = {
-  new: 'bg-gray-500/20 text-gray-400',
-  cold: 'bg-info/20 text-info',
-  warm: 'bg-warning/20 text-warning',
-  hot: 'bg-danger/20 text-danger',
-  existing_client: 'bg-success/20 text-success',
-  enrolled: 'bg-purple-500/20 text-purple-400',
-};
-
 type FilterTab = 'open' | 'resolved' | 'all';
 
 export function EscalationManager() {
