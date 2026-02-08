@@ -92,5 +92,5 @@ The Calendly booking flow uses `ig_leads.booking_state` for durable state tracki
 - Phase 3: ✅ Knowledge base + RAG ingestion (92 chunks across 4 files, tested)
 - Phase 4: ✅ Core n8n workflows (AGENTS.md, 3 workflows: IG DM Handler, Error Handler, Telegram Callback)
 - Phase 5: ✅ Secondary workflows (6 workflows: Comment-to-DM, Token Refresh, Daily Analytics, Stale Alert, Summarizer, Re-embedder)
-- Phase 6: ⬜ Admin UI (standalone app)
+- Phase 6: ✅ Admin UI (standalone Vite + React + TS + Tailwind app in admin-ui/)
 - Phase 7: ⬜ Docs, scripts, testing, hardening
