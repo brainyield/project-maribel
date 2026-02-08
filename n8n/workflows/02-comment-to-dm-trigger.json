@@ -1,0 +1,671 @@
+{
+  "id": "LHwqWalUBk1IdDeA",
+  "name": "Maribel \u2014 Comment-to-DM Trigger",
+  "active": false,
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        500
+      ],
+      "parameters": {
+        "path": "ig-comments",
+        "httpMethod": [
+          "GET",
+          "POST"
+        ],
+        "responseMode": "responseNode",
+        "options": {
+          "multipleMethods": true
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "is-verification",
+      "name": "Is Verification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        470,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "verify-check",
+              "leftValue": "={{ $json.query['hub.mode'] }}",
+              "rightValue": "subscribe",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "verify-response",
+      "name": "Verification Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        690,
+        350
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "ack-response",
+      "name": "Acknowledge 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        690,
+        500
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "EVENT_RECEIVED",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "extract-comment",
+      "name": "Extract Comment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        910,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst entry = (body.entry || [])[0];\nif (!entry) return [];\n\nconst changes = (entry.changes || [])[0];\nif (!changes || changes.field !== 'comments') return [];\n\nconst value = changes.value || {};\n\n// Only process new comments (verb = 'add')\nif (value.verb && value.verb !== 'add') return [];\n\nconst commenterId = (value.from || {}).id;\nconst commenterUsername = (value.from || {}).username || null;\nconst commentText = value.text || '';\nconst commentId = value.id || null;\nconst mediaId = (value.media || {}).id || null;\n\nif (!commenterId || !commentText || !mediaId) return [];\n\nreturn [{\n  json: {\n    commenter_id: commenterId,\n    commenter_username: commenterUsername,\n    comment_text: commentText,\n    comment_id: commentId,\n    media_id: mediaId\n  }\n}];"
+      }
+    },
+    {
+      "id": "normalize-keyword",
+      "name": "Normalize Keyword",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1130,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const commentText = $json.comment_text.trim();\n// Extract first word as potential keyword (uppercase)\nconst firstWord = commentText.split(/\\s+/)[0].toUpperCase().replace(/[^A-Z]/g, '');\n\nreturn [{\n  json: {\n    ...$json,\n    normalized_keyword: firstWord,\n    full_comment_upper: commentText.toUpperCase()\n  }\n}];"
+      }
+    },
+    {
+      "id": "fetch-config",
+      "name": "Fetch Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1350,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/agent_config",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "key,value"
+            },
+            {
+              "name": "key",
+              "value": "in.(graph_api_version,auto_reply_enabled)"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "lookup-keyword",
+      "name": "Lookup Keyword",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1570,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/keyword_triggers",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "keyword",
+              "value": "=eq.{{ $('Normalize Keyword').first().json.normalized_keyword }}"
+            },
+            {
+              "name": "is_active",
+              "value": "eq.true"
+            },
+            {
+              "name": "select",
+              "value": "keyword,dm_template_en,dm_template_es,program_slug"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "keyword-found",
+      "name": "Keyword Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1790,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "kw-check",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "dedup-comment-check",
+      "name": "Check Duplicate Outreach",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2010,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_comment_triggers",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $('Extract Comment Data').first().json.commenter_id }}"
+            },
+            {
+              "name": "media_id",
+              "value": "=eq.{{ $('Extract Comment Data').first().json.media_id }}"
+            },
+            {
+              "name": "select",
+              "value": "id"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "already-dm",
+      "name": "Already DM'd?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2230,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "dedup-check",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 1 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "detect-language",
+      "name": "Detect Language",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2450,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const commentData = $('Extract Comment Data').first().json;\nconst commentText = commentData.comment_text.trim();\nconst keyword = $('Normalize Keyword').first().json.normalized_keyword;\nconst keywordTrigger = $('Lookup Keyword').first().json;\nconst trigger = Array.isArray(keywordTrigger) ? keywordTrigger[0] : keywordTrigger;\n\n// If comment is ONLY the keyword, default to English\nlet language = 'en';\nconst commentUpper = commentText.toUpperCase().replace(/[^A-Z]/g, '');\n\nif (commentUpper !== keyword) {\n  // Comment has additional text - try to detect language\n  const spanishIndicators = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00bf\\u00a1]|hola|gracias|quiero|buenos|informaci\\u00f3n|interesa|por favor|puede/i;\n  if (spanishIndicators.test(commentText)) {\n    language = 'es';\n  }\n}\n\nconst dmTemplate = language === 'es' ? trigger.dm_template_es : trigger.dm_template_en;\n\n// Get graph_api_version from config\nconst configData = $('Fetch Config').first().json;\nconst configArray = Array.isArray(configData) ? configData : [configData];\nlet graphVersion = 'v21.0';\nfor (const row of configArray) {\n  if (row.key === 'graph_api_version') graphVersion = row.value;\n}\n\nreturn [{\n  json: {\n    commenter_id: commentData.commenter_id,\n    commenter_username: commentData.commenter_username,\n    comment_text: commentData.comment_text,\n    media_id: commentData.media_id,\n    keyword: keyword,\n    program_slug: trigger.program_slug,\n    language: language,\n    dm_template: dmTemplate,\n    graph_api_version: graphVersion\n  }\n}];"
+      }
+    },
+    {
+      "id": "send-dm",
+      "name": "Send DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2670,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $json.graph_api_version }}/me/messages?access_token={{ $env.META_PAGE_ACCESS_TOKEN }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $json.commenter_id }}\" },\n  \"message\": { \"text\": {{ JSON.stringify($json.dm_template) }} }\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "log-comment-trigger",
+      "name": "Log Comment Trigger",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2890,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_comment_triggers",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Detect Language').first().json.commenter_id }}\",\n  \"media_id\": \"{{ $('Detect Language').first().json.media_id }}\",\n  \"keyword\": \"{{ $('Detect Language').first().json.keyword }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "upsert-lead",
+      "name": "Upsert Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3110,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Detect Language').first().json.commenter_id }}\",\n  \"ig_username\": {{ JSON.stringify($('Detect Language').first().json.commenter_username) }},\n  \"language\": \"{{ $('Detect Language').first().json.language }}\",\n  \"referral_source\": \"comment_{{ $('Detect Language').first().json.keyword }}_{{ $('Detect Language').first().json.media_id }}\",\n  \"last_contact_at\": \"{{ new Date().toISOString() }}\",\n  \"interests\": {{ JSON.stringify($('Detect Language').first().json.program_slug !== 'general' ? [$('Detect Language').first().json.program_slug] : []) }}\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "save-dm-conversation",
+      "name": "Save DM to History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3330,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Detect Language').first().json.commenter_id }}\",\n  \"role\": \"assistant\",\n  \"content\": {{ JSON.stringify($('Detect Language').first().json.dm_template) }},\n  \"source\": \"comment_trigger\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is Verification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Verification?": {
+      "main": [
+        [
+          {
+            "node": "Verification Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge 200": {
+      "main": [
+        [
+          {
+            "node": "Extract Comment Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Comment Data": {
+      "main": [
+        [
+          {
+            "node": "Normalize Keyword",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Keyword": {
+      "main": [
+        [
+          {
+            "node": "Fetch Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Config": {
+      "main": [
+        [
+          {
+            "node": "Lookup Keyword",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Keyword": {
+      "main": [
+        [
+          {
+            "node": "Keyword Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keyword Found?": {
+      "main": [
+        [
+          {
+            "node": "Check Duplicate Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Check Duplicate Outreach": {
+      "main": [
+        [
+          {
+            "node": "Already DM'd?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already DM'd?": {
+      "main": [
+        [
+          {
+            "node": "Detect Language",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Detect Language": {
+      "main": [
+        [
+          {
+            "node": "Send DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send DM": {
+      "main": [
+        [
+          {
+            "node": "Log Comment Trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Comment Trigger": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead": {
+      "main": [
+        [
+          {
+            "node": "Save DM to History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "3bq70FE4nwVdRiQI",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

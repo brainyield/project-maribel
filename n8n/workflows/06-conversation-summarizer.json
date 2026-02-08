@@ -1,0 +1,488 @@
+{
+  "id": "VafJa2fByj8KKMOZ",
+  "name": "Maribel \u2014 Conversation Summarizer",
+  "active": false,
+  "nodes": [
+    {
+      "id": "cron-trigger",
+      "name": "Every 2 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        500
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */2 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "fetch-config",
+      "name": "Fetch Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        470,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/agent_config",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "eq.memory_session_gap_hours"
+            },
+            {
+              "name": "select",
+              "value": "value"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "find-needing-summary",
+      "name": "Find Needing Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        690,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/get_conversations_needing_summary",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"gap_hours\": {{ parseInt(($('Fetch Config').first().json[0] || {}).value) || 2 }}\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "has-conversations",
+      "name": "Any to Summarize?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        910,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "conv-check",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 0 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "split-senders",
+      "name": "Split Into Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1130,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const conversations = $json;\nconst arr = Array.isArray(conversations) ? conversations : [];\nreturn arr.map(c => ({ json: { ig_sender_id: c.ig_sender_id, last_message_at: c.last_message_at, message_count: c.message_count } }));"
+      }
+    },
+    {
+      "id": "fetch-messages",
+      "name": "Fetch Messages Since Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1350,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $json.ig_sender_id }}"
+            },
+            {
+              "name": "select",
+              "value": "role,content,source,created_at"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            },
+            {
+              "name": "limit",
+              "value": "50"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "fetch-existing-summary",
+      "name": "Fetch Existing Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1570,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $('Split Into Items').item.json.ig_sender_id }}"
+            },
+            {
+              "name": "select",
+              "value": "conversation_summary"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "build-summary-request",
+      "name": "Build Summary Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1790,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const messagesRaw = $('Fetch Messages Since Summary').first().json;\nconst messages = Array.isArray(messagesRaw) ? messagesRaw : [messagesRaw];\n\nconst conversationText = messages.map(m =>\n  (m.role === 'user' ? 'Parent' : 'Maribel') + ': ' + m.content\n).join('\\n');\n\nconst leadData = $('Fetch Existing Summary').first().json;\nconst lead = Array.isArray(leadData) ? leadData[0] : leadData;\nconst existingSummary = (lead || {}).conversation_summary || '';\n\nconst systemPrompt = 'You are a conversation summarizer for a homeschool education company\\'s customer service system. Generate a concise 3-5 sentence summary of this conversation session. Capture:\\n1. What the parent asked about or discussed\\n2. What was recommended or shared\\n3. Any concerns or objections raised\\n4. The outcome or current status\\n5. Any follow-up needed\\n\\n' + (existingSummary ? 'PREVIOUS SUMMARY (incorporate and update, don\\'t repeat):\\n' + existingSummary : '') + '\\n\\nWrite in third person. Be specific about names, programs, grades, and details mentioned.';\n\nreturn [{\n  json: {\n    sender_id: $('Split Into Items').item.json.ig_sender_id,\n    model: 'claude-sonnet-4-5-20250929',\n    max_tokens: 300,\n    system: systemPrompt,\n    messages: [{\n      role: 'user',\n      content: 'Summarize this conversation session:\\n\\n' + conversationText\n    }]\n  }\n}];"
+      }
+    },
+    {
+      "id": "claude-api",
+      "name": "Claude Summarize",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2010,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"{{ $json.model }}\",\n  \"max_tokens\": {{ $json.max_tokens }},\n  \"system\": {{ JSON.stringify($json.system) }},\n  \"messages\": {{ JSON.stringify($json.messages) }}\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "extract-summary",
+      "name": "Extract Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2230,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const response = $json;\nconst content = response.content || [];\nconst summary = content\n  .filter(block => block.type === 'text')\n  .map(block => block.text)\n  .join('\\n');\n\nreturn [{\n  json: {\n    sender_id: $('Build Summary Request').item.json.sender_id,\n    summary: summary\n  }\n}];"
+      }
+    },
+    {
+      "id": "update-lead-summary",
+      "name": "Update Lead Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2450,
+        500
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $json.sender_id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"conversation_summary\": {{ JSON.stringify($json.summary) }},\n  \"summary_updated_at\": \"{{ new Date().toISOString() }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 2 Hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Config": {
+      "main": [
+        [
+          {
+            "node": "Find Needing Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Needing Summary": {
+      "main": [
+        [
+          {
+            "node": "Any to Summarize?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any to Summarize?": {
+      "main": [
+        [
+          {
+            "node": "Split Into Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Split Into Items": {
+      "main": [
+        [
+          {
+            "node": "Fetch Messages Since Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Messages Since Summary": {
+      "main": [
+        [
+          {
+            "node": "Fetch Existing Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Existing Summary": {
+      "main": [
+        [
+          {
+            "node": "Build Summary Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary Request": {
+      "main": [
+        [
+          {
+            "node": "Claude Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Summarize": {
+      "main": [
+        [
+          {
+            "node": "Extract Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Summary": {
+      "main": [
+        [
+          {
+            "node": "Update Lead Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "3bq70FE4nwVdRiQI",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

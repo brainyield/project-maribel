@@ -1,0 +1,103 @@
+{
+  "id": "d2qsqiz9hskFjyla",
+  "name": "Maribel — Stale Conversation Alert",
+  "active": false,
+  "nodes": [
+    {
+      "id": "cron-trigger",
+      "name": "Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [250, 500],
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 */6 * * *" }] }
+      }
+    },
+    {
+      "id": "find-stale",
+      "name": "Find Stale Conversations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [470, 500],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "role", "value": "eq.user" },
+            { "name": "created_at", "value": "=lt.{{ new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString() }}" },
+            { "name": "created_at", "value": "=gt.{{ new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }}" },
+            { "name": "select", "value": "ig_sender_id,content,created_at" },
+            { "name": "order", "value": "created_at.desc" }
+          ]
+        },
+        "options": { "timeout": 15000 }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "filter-stale",
+      "name": "Filter Stale",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [690, 500],
+      "parameters": {
+        "jsCode": "const messages = $json;\nconst msgArray = Array.isArray(messages) ? messages : [];\n\nif (msgArray.length === 0) {\n  return [{ json: { stale_count: 0, conversations: [] } }];\n}\n\nconst bySender = {};\nfor (const msg of msgArray) {\n  if (!bySender[msg.ig_sender_id]) {\n    bySender[msg.ig_sender_id] = msg;\n  }\n}\n\nconst staleList = Object.values(bySender).map(msg => ({\n  sender_id: msg.ig_sender_id,\n  last_message: (msg.content || '').substring(0, 100),\n  hours_ago: Math.round((Date.now() - new Date(msg.created_at).getTime()) / 3600000)\n}));\n\nreturn [{ json: { stale_count: staleList.length, conversations: staleList } }];"
+      }
+    },
+    {
+      "id": "has-stale",
+      "name": "Any Stale?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [910, 500],
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2, "leftValue": "", "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [{ "id": "stale-check", "leftValue": "={{ $json.stale_count }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "telegram-alert",
+      "name": "Telegram Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1130, 400],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "Content-Type", "value": "application/json" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $env.TELEGRAM_CHAT_ID }}\",\n  \"text\": {{ JSON.stringify('\\u23f0 ' + $json.stale_count + ' conversation(s) approaching 24-hour window.\\n\\n' + $json.conversations.map(c => '\\u2022 ' + c.sender_id + ' (' + c.hours_ago + 'h ago): ' + c.last_message).join('\\n') + '\\n\\nReview and respond manually if needed.') }}\n}",
+        "options": { "timeout": 15000 }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 6 Hours": { "main": [[{ "node": "Find Stale Conversations", "type": "main", "index": 0 }]] },
+    "Find Stale Conversations": { "main": [[{ "node": "Filter Stale", "type": "main", "index": 0 }]] },
+    "Filter Stale": { "main": [[{ "node": "Any Stale?", "type": "main", "index": 0 }]] },
+    "Any Stale?": { "main": [[{ "node": "Telegram Alert", "type": "main", "index": 0 }], []] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "3bq70FE4nwVdRiQI",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

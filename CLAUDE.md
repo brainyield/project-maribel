@@ -6,7 +6,7 @@
 
 ## Project Summary
 
-**Maribel** is a bilingual (English/Spanish) AI-powered Instagram DM agent for **Eaton Academic**, a homeschool education company in South Florida. Maribel handles customer service and sales conversations via Instagram Direct Messages — qualifying leads, answering program questions using RAG-retrieved knowledge, remembering returning parents across sessions, proactively booking consultation calls via Calendly, and escalating complex situations to Ivan via Telegram.
+**Maribel** is a bilingual (English/Spanish) AI-powered Instagram DM agent for **Eaton Academic**, a homeschool education company in South Florida. Maribel handles customer service and sales conversations via Instagram Direct Messages — qualifying leads, answering program questions using RAG-retrieved knowledge, remembering returning parents across sessions, proactively booking consultation calls via Calendly, and escalating complex situations to a team member via Telegram.
 
 ### Core Stack
 
@@ -87,10 +87,41 @@ The Calendly booking flow uses `ig_leads.booking_state` for durable state tracki
 ## Current Build Status
 
 - Phase 0: ✅ Complete (repo scaffold, CLAUDE.md, reference docs)
-- Phase 1: ⬜ Ivan's manual setup (Meta App, Telegram bot, API keys, Supabase project)
+- Phase 1: ⬜ Manual setup (Meta App, Telegram bot, API keys, Supabase project)
 - Phase 2: ✅ Supabase schema + migrations (17 migrations applied, A1/A5/A14 fixes included)
-- Phase 3: ✅ Knowledge base + RAG ingestion (92 chunks across 4 files, tested)
+- Phase 3: ✅ Knowledge base + RAG ingestion (95 chunks across 5 files, tested)
 - Phase 4: ✅ Core n8n workflows (AGENTS.md, 3 workflows: IG DM Handler, Error Handler, Telegram Callback)
 - Phase 5: ✅ Secondary workflows (6 workflows: Comment-to-DM, Token Refresh, Daily Analytics, Stale Alert, Summarizer, Re-embedder)
 - Phase 6: ✅ Admin UI (standalone Vite + React + TS + Tailwind app in admin-ui/)
-- Phase 7: ⬜ Docs, scripts, testing, hardening
+- Phase 7: ✅ Docs, scripts, testing, hardening (4 docs, 4 scripts, 9 workflow exports, all DB tests passed)
+
+---
+
+## Maintenance Notes
+
+### Updating the Knowledge Base
+1. Edit or add markdown files in `knowledge-base/`
+2. Use the Admin UI Knowledge page to edit chunks directly, or re-ingest via the Knowledge Re-embedder workflow (Workflow 7)
+3. After editing chunk content, trigger re-embedding: POST to `/webhook/reembed-knowledge` with `{ "chunk_ids": [<ids>] }` or `{}` for all chunks
+4. Embeddings use OpenAI `text-embedding-3-small` (1536 dimensions)
+
+### Modifying the System Prompt
+1. Update the `system_prompt` value in the `agent_config` table via the Admin UI Config page or directly in Supabase
+2. Changes take effect immediately on the next message (no workflow restart needed)
+3. The prompt is loaded fresh on every incoming message from `agent_config`
+
+### Adding Keyword Triggers (Comment-to-DM)
+1. Insert a new row into the `keyword_triggers` table with: `keyword` (uppercase), `dm_template_en`, `dm_template_es`, `program_slug`, `is_active`
+2. When a user comments the keyword on an Instagram post, Workflow 2 sends the template DM automatically
+3. Deduplication prevents the same user from receiving the DM twice for the same post
+
+### Tuning RAG Retrieval
+- `rag_match_threshold` in `agent_config`: lower = more results (default 0.3). Raise to 0.4–0.5 for stricter matching
+- `rag_match_count` in `agent_config`: number of chunks returned (default 5)
+- `conversation_history_limit` in `agent_config`: number of recent messages sent to Claude (default 15)
+- Monitor `metadata_parse_failures` table for Claude response format issues
+
+### Workflow Error Monitoring
+- All workflow errors route to Workflow 9 (Global Error Handler) which logs to `api_error_log` and sends a Telegram alert
+- Check the Admin UI Dashboard for daily metrics and error counts
+- The Daily Analytics workflow (Workflow 4) also cleans up stale conversation locks each morning

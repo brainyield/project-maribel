@@ -1,0 +1,134 @@
+{
+  "id": "dbA8EnJZqCeceNA9",
+  "name": "Maribel — Telegram Callback Handler",
+  "active": true,
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "parameters": { "path": "telegram-callback", "httpMethod": "POST", "responseMode": "responseNode" }
+    },
+    {
+      "id": "parse-callback",
+      "name": "Parse Callback Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [470, 300],
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst callbackQuery = body.callback_query;\n\nif (!callbackQuery) {\n  return [{ json: { action: 'none' } }];\n}\n\nlet data = {};\ntry {\n  data = JSON.parse(callbackQuery.data);\n} catch (e) {\n  data = { action: 'unknown' };\n}\n\nreturn [{\n  json: {\n    callback_query_id: callbackQuery.id,\n    action: data.action || 'unknown',\n    escalation_id: data.escalation_id,\n    chat_id: callbackQuery.message?.chat?.id,\n    message_id: callbackQuery.message?.message_id,\n    original_text: callbackQuery.message?.text || ''\n  }\n}];"
+      }
+    },
+    {
+      "id": "respond-ok",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [470, 500],
+      "parameters": { "respondWith": "text", "responseBody": "OK", "options": { "responseCode": 200 } }
+    },
+    {
+      "id": "switch-action",
+      "name": "Action Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [690, 300],
+      "parameters": {
+        "rules": {
+          "values": [
+            { "outputKey": "resolve", "conditions": { "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "resolve", "operator": { "type": "string", "operation": "equals" } }] } },
+            { "outputKey": "keep_paused", "conditions": { "conditions": [{ "leftValue": "={{ $json.action }}", "rightValue": "keep_paused", "operator": { "type": "string", "operation": "equals" } }] } }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "resolve-escalation",
+      "name": "Resolve Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/resolve_escalation",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_escalation_id\": {{ $json.escalation_id }},\n  \"p_resolved_by\": \"telegram\"\n}",
+        "options": { "timeout": 10000 }
+      }
+    },
+    {
+      "id": "answer-resolve",
+      "name": "Telegram: Resolved",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"callback_query_id\": \"{{ $('Parse Callback Data').first().json.callback_query_id }}\",\n  \"text\": \"Escalation resolved! Maribel will resume.\"\n}",
+        "options": { "timeout": 10000 }
+      }
+    },
+    {
+      "id": "edit-message",
+      "name": "Edit Original Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1130, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/editMessageText",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $('Parse Callback Data').first().json.chat_id }}\",\n  \"message_id\": {{ $('Parse Callback Data').first().json.message_id }},\n  \"text\": {{ JSON.stringify('\\u2705 RESOLVED — Maribel will resume on this thread.\\n\\n' + $('Parse Callback Data').first().json.original_text) }}\n}",
+        "options": { "timeout": 10000 }
+      },
+      "continueOnFail": true
+    },
+    {
+      "id": "answer-keep-paused",
+      "name": "Telegram: Keep Paused",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [910, 420],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/answerCallbackQuery",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"callback_query_id\": \"{{ $('Parse Callback Data').first().json.callback_query_id }}\",\n  \"text\": \"Keeping conversation paused. Maribel will stay silent.\"\n}",
+        "options": { "timeout": 10000 }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Parse Callback Data", "type": "main", "index": 0 }, { "node": "Respond 200", "type": "main", "index": 0 }]] },
+    "Parse Callback Data": { "main": [[{ "node": "Action Type", "type": "main", "index": 0 }]] },
+    "Action Type": { "main": [[{ "node": "Resolve Escalation", "type": "main", "index": 0 }], [{ "node": "Telegram: Keep Paused", "type": "main", "index": 0 }]] },
+    "Resolve Escalation": { "main": [[{ "node": "Telegram: Resolved", "type": "main", "index": 0 }, { "node": "Edit Original Message", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner"
+  }
+}

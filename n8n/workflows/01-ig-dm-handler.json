@@ -1,0 +1,2310 @@
+{
+  "id": "XZF3uv9A8PAqtUqZ",
+  "name": "Maribel \u2014 IG DM Handler",
+  "active": false,
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        500
+      ],
+      "parameters": {
+        "path": "ig-dm",
+        "httpMethod": [
+          "GET",
+          "POST"
+        ],
+        "responseMode": "responseNode",
+        "options": {
+          "multipleMethods": true
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "is-verification",
+      "name": "Is Verification?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        470,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "verification-check",
+              "leftValue": "={{ $json.query['hub.mode'] }}",
+              "rightValue": "subscribe",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "verify-response",
+      "name": "Verification Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        690,
+        350
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "ack-response",
+      "name": "Acknowledge 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        690,
+        500
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "EVENT_RECEIVED",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "extract-message",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        910,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst entry = body.entry?.[0];\nconst messaging = entry?.messaging?.[0];\n\nif (!messaging || !messaging.message) {\n  return [];\n}\n\nconst messageText = messaging.message.text || null;\nconst hasAttachment = messaging.message.attachments?.length > 0;\n\nif (!messageText && !hasAttachment) {\n  return [];\n}\n\nreturn [{\n  json: {\n    sender_id: messaging.sender.id,\n    recipient_id: messaging.recipient.id,\n    message_text: messageText || '[Non-text message: image/sticker/attachment]',\n    message_mid: messaging.message.mid,\n    timestamp: messaging.timestamp,\n    is_echo: messaging.message.is_echo || false,\n    has_text: !!messageText\n  }\n}];"
+      }
+    },
+    {
+      "id": "is-echo",
+      "name": "Is Echo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1130,
+        500
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "echo-check",
+              "leftValue": "={{ $json.is_echo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "handle-echo",
+      "name": "Handle Echo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        350
+      ],
+      "parameters": {
+        "jsCode": "const info = $json;\nreturn [{\n  json: {\n    sender_id: info.recipient_id,\n    message_text: info.message_text,\n    message_mid: info.message_mid,\n    source: 'manual',\n    action: 'log_manual_reply'\n  }\n}];"
+      }
+    },
+    {
+      "id": "echo-dedup-check",
+      "name": "Echo Already Logged?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1570,
+        350
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "message_mid",
+              "value": "=eq.{{ $json.message_mid }}"
+            },
+            {
+              "name": "select",
+              "value": "id"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "echo-is-new",
+      "name": "Echo Is Manual?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1790,
+        350
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "echo-new-check",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 1 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "log-manual-reply",
+      "name": "Log Manual Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2010,
+        350
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Handle Echo').first().json.sender_id }}\",\n  \"role\": \"assistant\",\n  \"content\": {{ JSON.stringify($('Handle Echo').first().json.message_text) }},\n  \"message_mid\": \"{{ $('Handle Echo').first().json.message_mid }}\",\n  \"source\": \"manual\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "dedup-check",
+      "name": "Dedup Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1350,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "message_mid",
+              "value": "=eq.{{ $('Extract Message Data').first().json.message_mid }}"
+            },
+            {
+              "name": "select",
+              "value": "id"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "is-duplicate",
+      "name": "Is Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1570,
+        600
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "dup-check",
+              "leftValue": "={{ Array.isArray($json) ? $json.length : 1 }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "log-duplicate",
+      "name": "Log Duplicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1790,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/duplicate_webhook_log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message_mid\": \"{{ $('Extract Message Data').first().json.message_mid }}\",\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "fetch-config",
+      "name": "Fetch Agent Config",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1790,
+        700
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/agent_config",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "key,value"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "config-to-object",
+      "name": "Config to Object",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2010,
+        700
+      ],
+      "parameters": {
+        "jsCode": "const rows = $json;\nconst configArray = Array.isArray(rows) ? rows : $input.all().map(i => i.json);\nconst config = {};\nfor (const row of configArray) {\n  config[row.key] = row.value;\n}\nreturn [{ json: { config } }];"
+      }
+    },
+    {
+      "id": "kill-switch",
+      "name": "Kill Switch?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2230,
+        700
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "kill-check",
+              "leftValue": "={{ $json.config.auto_reply_enabled }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "acquire-lock",
+      "name": "Acquire Lock",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2450,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/acquire_conversation_lock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "lock-acquired",
+      "name": "Lock Acquired?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2670,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "lock-check",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "check-paused",
+      "name": "Check If Paused",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2890,
+        800
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $('Extract Message Data').first().json.sender_id }}"
+            },
+            {
+              "name": "select",
+              "value": "status,ig_sender_id,parent_name,child_name,child_grade,location,interests,lead_score,language,calendly_booked,total_messages,first_contact_at,conversation_summary,booking_state,booking_selected_slot,booking_email,email"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "is-paused",
+      "name": "Is Paused/Escalated?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3110,
+        800
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "paused-check",
+              "leftValue": "={{ ($json[0] || {}).status }}",
+              "rightValue": "escalated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "paused-check-2",
+              "leftValue": "={{ ($json[0] || {}).status }}",
+              "rightValue": "paused",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "save-while-paused",
+      "name": "Save Msg (Paused)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3330,
+        700
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\",\n  \"role\": \"user\",\n  \"content\": {{ JSON.stringify($('Extract Message Data').first().json.message_text) }},\n  \"message_mid\": \"{{ $('Extract Message Data').first().json.message_mid }}\",\n  \"source\": \"system\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "release-lock-paused",
+      "name": "Release Lock (Paused)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3550,
+        700
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/release_conversation_lock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "save-user-msg",
+      "name": "Save User Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3330,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\",\n  \"role\": \"user\",\n  \"content\": {{ JSON.stringify($('Extract Message Data').first().json.message_text) }},\n  \"message_mid\": \"{{ $('Extract Message Data').first().json.message_mid }}\",\n  \"source\": \"system\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "fetch-history",
+      "name": "Fetch History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3550,
+        900
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $('Extract Message Data').first().json.sender_id }}"
+            },
+            {
+              "name": "select",
+              "value": "role,content,source,created_at"
+            },
+            {
+              "name": "order",
+              "value": "created_at.desc"
+            },
+            {
+              "name": "limit",
+              "value": "={{ $('Config to Object').first().json.config.conversation_history_limit || '15' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "rag-embed",
+      "name": "RAG: Embed Question",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3770,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($('Extract Message Data').first().json.message_text) }}\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "rag-retrieve",
+      "name": "RAG: Match Chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3990,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/match_knowledge_chunks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"query_embedding\": {{ JSON.stringify(($json.data || [])[0] ? $json.data[0].embedding : []) }},\n  \"match_threshold\": {{ parseFloat($('Config to Object').first().json.config.rag_match_threshold) || 0.3 }},\n  \"match_count\": {{ parseInt($('Config to Object').first().json.config.rag_match_count) || 5 }}\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "build-claude-request",
+      "name": "Build Claude Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4210,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const config = $('Config to Object').first().json.config;\nconst currentMessage = $('Extract Message Data').first().json;\nconst leadData = $('Check If Paused').first().json;\nconst leadProfile = Array.isArray(leadData) ? leadData[0] : leadData;\n\nconst historyRaw = $('Fetch History').all();\nlet historyItems = [];\nfor (const item of historyRaw) {\n  const data = item.json;\n  if (Array.isArray(data)) {\n    historyItems = data;\n  } else if (data.role) {\n    historyItems.push(data);\n  }\n}\n\nconst messages = historyItems.reverse().map(msg => ({\n  role: msg.role === 'assistant' ? 'assistant' : 'user',\n  content: msg.content\n}));\n\nif (!messages.length || messages[messages.length - 1]?.content !== currentMessage.message_text) {\n  messages.push({ role: 'user', content: currentMessage.message_text });\n}\n\nlet leadContext = 'NEW LEAD - no prior information.';\nif (leadProfile && leadProfile.ig_sender_id) {\n  leadContext = [\n    'LEAD CONTEXT:',\n    '- Name: ' + (leadProfile.parent_name || 'Unknown'),\n    '- Child Name: ' + (leadProfile.child_name || 'Unknown'),\n    '- Child Grade: ' + (leadProfile.child_grade || 'Unknown'),\n    '- Location: ' + (leadProfile.location || 'Unknown'),\n    '- Interests: ' + ((leadProfile.interests || []).join(', ') || 'None yet'),\n    '- Lead Score: ' + (leadProfile.lead_score || 'new'),\n    '- Language: ' + (leadProfile.language || 'en'),\n    '- Calendly Booked: ' + (leadProfile.calendly_booked ? 'Yes' : 'No'),\n    '- Total Messages: ' + (leadProfile.total_messages || 0),\n    '- First Contact: ' + (leadProfile.first_contact_at || 'Now'),\n    '- Booking State: ' + (leadProfile.booking_state || 'none'),\n  ].join('\\n');\n}\n\nconst conversationSummary = leadProfile?.conversation_summary\n  ? 'CONVERSATION MEMORY (summary of previous sessions):\\n' + leadProfile.conversation_summary\n  : '';\n\nconst ragData = $('RAG: Match Chunks').first().json;\nconst ragChunks = Array.isArray(ragData) ? ragData : [];\n\nlet knowledgeContext = 'No specific knowledge chunks retrieved. Respond using your general knowledge in the system prompt.';\nif (ragChunks.length > 0) {\n  knowledgeContext = 'RETRIEVED KNOWLEDGE CONTEXT (relevant to this query):\\n' +\n    ragChunks.map((chunk, i) =>\n      '[' + (i+1) + '] ' + chunk.section_title + ' (from ' + chunk.source_file + ', relevance: ' + (chunk.similarity * 100).toFixed(0) + '%):\\n' + chunk.content\n    ).join('\\n\\n');\n}\n\nconst systemMessages = [\n  {\n    type: 'text',\n    text: config.system_prompt,\n    cache_control: { type: 'ephemeral' }\n  },\n  {\n    type: 'text',\n    text: '## Current Context\\n- Current date/time: ' + new Date().toISOString() + '\\n- Proactive booking enabled: ' + (config.proactive_booking_enabled === 'true') + '\\n\\n' + leadContext + '\\n\\n' + conversationSummary + '\\n\\n' + knowledgeContext\n  }\n];\n\nreturn [{\n  json: {\n    model: 'claude-sonnet-4-5-20250929',\n    max_tokens: 1024,\n    system: systemMessages,\n    messages: messages\n  }\n}];"
+      }
+    },
+    {
+      "id": "claude-api",
+      "name": "Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4430,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "claude-success",
+      "name": "Claude Success?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        4650,
+        900
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "claude-ok",
+              "leftValue": "={{ $json.content ? true : false }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "parse-response",
+      "name": "Parse Claude Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4870,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const response = $json;\nconst content = response.content || [];\nconst fullText = content\n  .filter(block => block.type === 'text')\n  .map(block => block.text)\n  .join('\\n');\n\nconst metadataSplit = fullText.split('---METADATA---');\nconst replyText = metadataSplit[0].trim();\n\nlet metadata = {};\nlet parseError = false;\n\nif (metadataSplit[1]) {\n  const metadataStr = metadataSplit[1].replace('---END---', '').trim();\n  try {\n    metadata = JSON.parse(metadataStr);\n  } catch (e) {\n    parseError = true;\n    metadata = {\n      escalate: false, lead_score: null, interests: [], grade: null,\n      location: null, sentiment: 'neutral', language: 'en',\n      parent_name: null, child_name: null, next_action: null,\n      calendly_offered: false, reason: null, summary: null, email: null\n    };\n  }\n} else {\n  parseError = true;\n  metadata = {\n    escalate: false, lead_score: null, interests: [], grade: null,\n    location: null, sentiment: 'neutral', language: 'en',\n    parent_name: null, child_name: null, next_action: null,\n    calendly_offered: false, reason: null, summary: null, email: null\n  };\n}\n\nif (parseError) {\n  const userMessage = $('Extract Message Data').first().json.message_text;\n  const spanishIndicators = /[\\u00e1\\u00e9\\u00ed\\u00f3\\u00fa\\u00f1\\u00bf\\u00a1]|hola|gracias|quiero|buenos|cu\\u00e1nto|informaci\\u00f3n/i;\n  if (spanishIndicators.test(userMessage)) {\n    metadata.language = 'es';\n  }\n}\n\nreturn [{\n  json: {\n    reply_text: replyText,\n    metadata: metadata,\n    parse_error: parseError,\n    escalate: metadata.escalate || false,\n    lead_score: metadata.lead_score || null,\n    interests: metadata.interests || [],\n    grade: metadata.grade || null,\n    location: metadata.location || null,\n    sentiment: metadata.sentiment || 'neutral',\n    language: metadata.language || 'en',\n    next_action: metadata.next_action || null,\n    parent_name: metadata.parent_name || null,\n    child_name: metadata.child_name || null,\n    email: metadata.email || null,\n    calendly_offered: metadata.calendly_offered || false,\n    reason: metadata.reason || null,\n    summary: metadata.summary || null\n  }\n}];"
+      }
+    },
+    {
+      "id": "fallback-flow",
+      "name": "Fallback Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4870,
+        1100
+      ],
+      "parameters": {
+        "jsCode": "const config = $('Config to Object').first().json.config;\nconst senderId = $('Extract Message Data').first().json.sender_id;\nconst graphVersion = config.graph_api_version || 'v21.0';\n\nreturn [{\n  json: {\n    sender_id: senderId,\n    reply_text: 'Thanks for your message! Let me look into this and get back to you shortly. \\u{1F60A}',\n    graph_api_version: graphVersion,\n    is_fallback: true\n  }\n}];"
+      }
+    },
+    {
+      "id": "send-fallback",
+      "name": "Send Fallback DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5090,
+        1100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $json.graph_api_version }}/me/messages?access_token={{ $env.META_PAGE_ACCESS_TOKEN }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $json.sender_id }}\" },\n  \"message\": { \"text\": {{ JSON.stringify($json.reply_text) }} }\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "save-fallback",
+      "name": "Save Fallback Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5310,
+        1100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\",\n  \"role\": \"assistant\",\n  \"content\": {{ JSON.stringify($('Fallback Message').first().json.reply_text) }},\n  \"source\": \"system\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "release-lock-fallback",
+      "name": "Release Lock (Fallback)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5530,
+        1100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/release_conversation_lock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "parse-error-check",
+      "name": "Parse Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5090,
+        900
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "parse-err",
+              "leftValue": "={{ $json.parse_error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "log-parse-failure",
+      "name": "Log Parse Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5310,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/metadata_parse_failures",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\",\n  \"raw_response\": {{ JSON.stringify($('Parse Claude Response').first().json.reply_text.substring(0, 500)) }},\n  \"error_message\": \"Metadata block missing or invalid JSON\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "is-offer-slots",
+      "name": "Is Offer Slots?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5530,
+        900
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "offer-check",
+              "leftValue": "={{ $('Parse Claude Response').first().json.next_action }}",
+              "rightValue": "offer_booking_slots",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "booking-enabled",
+              "leftValue": "={{ $('Config to Object').first().json.config.proactive_booking_enabled }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fetch-calendly-slots",
+      "name": "Fetch Calendly Slots",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5750,
+        700
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.calendly.com/event_type_available_times",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.CALENDLY_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "event_type",
+              "value": "={{ $('Config to Object').first().json.config.calendly_event_type_uri }}"
+            },
+            {
+              "name": "start_time",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "end_time",
+              "value": "={{ new Date(Date.now() + (parseInt($('Config to Object').first().json.config.calendly_slot_days_ahead) || 7) * 86400000).toISOString() }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "format-booking",
+      "name": "Format Booking Options",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5970,
+        700
+      ],
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Claude Response').first().json;\nconst config = $('Config to Object').first().json.config;\nconst slotsData = $('Fetch Calendly Slots').first().json;\nconst slots = slotsData.collection || [];\nconst numSlots = parseInt(config.calendly_slots_to_offer) || 4;\n\nif (!Array.isArray(slots) || slots.length === 0) {\n  const bookingLink = config.calendly_booking_link || 'https://calendly.com/eatonacademic/15min';\n  return [{\n    json: {\n      reply_text: parsed.reply_text + '\\n\\nYou can pick a time that works for you here: ' + bookingLink,\n      booking_mode: 'link_fallback'\n    }\n  }];\n}\n\nconst selectedSlots = [];\nconst seenDays = new Set();\n\nfor (const slot of slots) {\n  const date = new Date(slot.start_time);\n  const dayKey = date.toDateString();\n  if (!seenDays.has(dayKey) && selectedSlots.length < numSlots) {\n    seenDays.add(dayKey);\n    selectedSlots.push({\n      start_time: slot.start_time,\n      formatted: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })\n        + ' at ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })\n    });\n  }\n  if (selectedSlots.length >= numSlots) break;\n}\n\nif (selectedSlots.length < numSlots) {\n  for (const slot of slots) {\n    if (selectedSlots.length >= numSlots) break;\n    if (!selectedSlots.some(s => s.start_time === slot.start_time)) {\n      const date = new Date(slot.start_time);\n      selectedSlots.push({\n        start_time: slot.start_time,\n        formatted: date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })\n          + ' at ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })\n      });\n    }\n  }\n}\n\nconst slotList = selectedSlots.map((s, i) => (i+1) + '. ' + s.formatted).join('\\n');\nconst bookingText = 'I have a few times open for a quick 15-minute call:\\n\\n' + slotList + '\\n\\nWhich one works best for you? (Just reply with the number!)';\n\nreturn [{\n  json: {\n    reply_text: parsed.reply_text + '\\n\\n' + bookingText,\n    booking_mode: 'proactive',\n    slots: selectedSlots\n  }\n}];"
+      }
+    },
+    {
+      "id": "is-execute-booking",
+      "name": "Is Execute Booking?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5750,
+        1000
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "exec-booking-check",
+              "leftValue": "={{ $('Parse Claude Response').first().json.next_action }}",
+              "rightValue": "execute_booking",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "execute-calendly",
+      "name": "Execute Calendly Booking",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5970,
+        1050
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.calendly.com/scheduling_links",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.CALENDLY_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"max_event_count\": 1,\n  \"owner\": \"{{ $('Config to Object').first().json.config.calendly_event_type_uri }}\",\n  \"owner_type\": \"EventType\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "handle-booking-result",
+      "name": "Handle Booking Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6190,
+        1050
+      ],
+      "parameters": {
+        "jsCode": "const bookingResponse = $('Execute Calendly Booking').first().json;\nconst parsed = $('Parse Claude Response').first().json;\nconst bookingLink = bookingResponse.resource?.booking_url || bookingResponse.booking_url || null;\n\nif (bookingLink) {\n  return [{\n    json: {\n      reply_text: parsed.reply_text + '\\n\\nHere is your personal booking link: ' + bookingLink,\n      booking_confirmed: true,\n      booking_link: bookingLink\n    }\n  }];\n} else {\n  const fallbackLink = $('Config to Object').first().json.config.calendly_booking_link || 'https://calendly.com/eatonacademic/15min';\n  return [{\n    json: {\n      reply_text: parsed.reply_text + '\\n\\nYou can book directly here: ' + fallbackLink,\n      booking_confirmed: false\n    }\n  }];\n}"
+      }
+    },
+    {
+      "id": "split-reply",
+      "name": "Split Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6410,
+        900
+      ],
+      "parameters": {
+        "jsCode": "// Get reply text - check if booking flow modified it\nlet replyText;\ntry {\n  replyText = $('Format Booking Options').first().json.reply_text;\n} catch (e1) {\n  try {\n    replyText = $('Handle Booking Result').first().json.reply_text;\n  } catch (e2) {\n    replyText = $('Parse Claude Response').first().json.reply_text;\n  }\n}\n\nconst config = $('Config to Object').first().json.config;\nconst graphVersion = config.graph_api_version || 'v21.0';\nconst senderId = $('Extract Message Data').first().json.sender_id;\n\nconst MAX_LENGTH = 1000;\n\nif (replyText.length <= MAX_LENGTH) {\n  return [{ json: { message: replyText, sender_id: senderId, graph_api_version: graphVersion } }];\n}\n\nconst sentences = replyText.match(/[^.!?]+[.!?]+\\s*/g) || [replyText];\nconst chunks = [];\nlet current = '';\n\nfor (const sentence of sentences) {\n  if ((current + sentence).length > MAX_LENGTH && current.length > 0) {\n    chunks.push(current.trim());\n    current = sentence;\n  } else {\n    current += sentence;\n  }\n}\nif (current.trim()) chunks.push(current.trim());\n\n// Return one item per chunk - n8n loops over each automatically\nreturn chunks.map(chunk => ({\n  json: { message: chunk, sender_id: senderId, graph_api_version: graphVersion }\n}));"
+      }
+    },
+    {
+      "id": "send-reply",
+      "name": "Send Instagram Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6630,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/{{ $json.graph_api_version }}/me/messages?access_token={{ $env.META_PAGE_ACCESS_TOKEN }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $json.sender_id }}\" },\n  \"message\": { \"text\": {{ JSON.stringify($json.message) }} }\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "save-assistant-reply",
+      "name": "Save Assistant Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6850,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\",\n  \"role\": \"assistant\",\n  \"content\": {{ JSON.stringify($('Parse Claude Response').first().json.reply_text) }},\n  \"metadata\": {{ JSON.stringify($('Parse Claude Response').first().json.metadata) }},\n  \"source\": \"ai\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "upsert-lead",
+      "name": "Upsert Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7070,
+        900
+      ],
+      "parameters": {
+        "jsCode": "const parsed = $('Parse Claude Response').first().json;\nconst senderId = $('Extract Message Data').first().json.sender_id;\nconst existingLead = $('Check If Paused').first().json;\nconst lead = Array.isArray(existingLead) ? existingLead[0] : existingLead;\n\nconst upsertData = {\n  ig_sender_id: senderId,\n  last_contact_at: new Date().toISOString(),\n  status: 'active'\n};\n\nif (parsed.lead_score) upsertData.lead_score = parsed.lead_score;\nif (parsed.language) upsertData.language = parsed.language;\nif (parsed.parent_name) upsertData.parent_name = parsed.parent_name;\nif (parsed.child_name) upsertData.child_name = parsed.child_name;\nif (parsed.grade) upsertData.child_grade = parsed.grade;\nif (parsed.location) upsertData.location = parsed.location;\nif (parsed.email) upsertData.email = parsed.email;\nif (parsed.sentiment) upsertData.sentiment = parsed.sentiment;\n\nconst existingInterests = lead?.interests || [];\nconst newInterests = parsed.interests || [];\nconst mergedInterests = [...new Set([...existingInterests, ...newInterests])];\nif (mergedInterests.length > 0) upsertData.interests = mergedInterests;\n\nupsertData.total_messages = (lead?.total_messages || 0) + 2;\n\n// Booking state tracking (A5)\nconst nextAction = parsed.next_action;\nif (nextAction === 'offer_booking_slots') {\n  upsertData.booking_state = 'slots_offered';\n} else if (nextAction === 'confirm_booking_slot') {\n  upsertData.booking_state = 'slot_selected';\n} else if (nextAction === 'execute_booking') {\n  try {\n    const bookingResult = $('Handle Booking Result').first().json;\n    upsertData.booking_state = bookingResult.booking_confirmed ? 'booking_confirmed' : 'booking_failed';\n    if (bookingResult.booking_confirmed) upsertData.calendly_booked = true;\n  } catch (e) {\n    upsertData.booking_state = 'booking_failed';\n  }\n}\nif (parsed.email) upsertData.booking_email = parsed.email;\n\nreturn [{ json: { upsert_data: upsertData } }];"
+      }
+    },
+    {
+      "id": "upsert-lead-http",
+      "name": "Upsert Lead HTTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7290,
+        900
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.upsert_data) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "check-escalate",
+      "name": "Escalate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        7510,
+        900
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "esc-check",
+              "leftValue": "={{ $('Parse Claude Response').first().json.escalate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "create-escalation",
+      "name": "Create Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7730,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_escalations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"ig_sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\",\n  \"reason\": {{ JSON.stringify($('Parse Claude Response').first().json.reason || 'Escalated by Maribel') }},\n  \"conversation_summary\": {{ JSON.stringify($('Parse Claude Response').first().json.summary || '') }}\n}",
+        "options": {
+          "timeout": 10000
+        }
+      }
+    },
+    {
+      "id": "pause-lead",
+      "name": "Pause Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7950,
+        800
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_leads",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ig_sender_id",
+              "value": "=eq.{{ $('Extract Message Data').first().json.sender_id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{ \"status\": \"escalated\" }",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "telegram-escalation",
+      "name": "Telegram Escalation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        8170,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $env.TELEGRAM_CHAT_ID }}\",\n  \"text\": \"\\u{1F6A8} <b>Maribel Escalation</b>\\n\\n<b>IG User:</b> {{ $('Extract Message Data').first().json.sender_id }}\\n<b>Reason:</b> {{ $('Parse Claude Response').first().json.reason || 'N/A' }}\\n<b>Sentiment:</b> {{ $('Parse Claude Response').first().json.sentiment }}\\n<b>Lead Score:</b> {{ $('Parse Claude Response').first().json.lead_score || 'N/A' }}\\n\\n<b>Last message:</b> {{ $('Extract Message Data').first().json.message_text.substring(0, 200) }}\",\n  \"parse_mode\": \"HTML\",\n  \"reply_markup\": {\n    \"inline_keyboard\": [\n      [\n        { \"text\": \"Resolve & Resume\", \"callback_data\": {{ JSON.stringify(JSON.stringify({action: 'resolve', escalation_id: ($('Create Escalation').first().json[0] || $('Create Escalation').first().json).id || 0})) }} },\n        { \"text\": \"Keep Paused\", \"callback_data\": {{ JSON.stringify(JSON.stringify({action: 'keep_paused', escalation_id: ($('Create Escalation').first().json[0] || $('Create Escalation').first().json).id || 0})) }} }\n      ]\n    ]\n  }\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "release-lock-escalation",
+      "name": "Release Lock (Escalation)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        8390,
+        800
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/release_conversation_lock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "release-lock-success",
+      "name": "Release Lock (Success)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        7730,
+        1000
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/release_conversation_lock",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"sender_id\": \"{{ $('Extract Message Data').first().json.sender_id }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Is Verification?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Verification?": {
+      "main": [
+        [
+          {
+            "node": "Verification Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge 200": {
+      "main": [
+        [
+          {
+            "node": "Extract Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message Data": {
+      "main": [
+        [
+          {
+            "node": "Is Echo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Echo?": {
+      "main": [
+        [
+          {
+            "node": "Handle Echo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dedup Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Echo": {
+      "main": [
+        [
+          {
+            "node": "Echo Already Logged?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Echo Already Logged?": {
+      "main": [
+        [
+          {
+            "node": "Echo Is Manual?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Echo Is Manual?": {
+      "main": [
+        [
+          {
+            "node": "Log Manual Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedup Check": {
+      "main": [
+        [
+          {
+            "node": "Is Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "Log Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Agent Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Agent Config": {
+      "main": [
+        [
+          {
+            "node": "Config to Object",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config to Object": {
+      "main": [
+        [
+          {
+            "node": "Kill Switch?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kill Switch?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Acquire Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acquire Lock": {
+      "main": [
+        [
+          {
+            "node": "Lock Acquired?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Acquired?": {
+      "main": [
+        [
+          {
+            "node": "Check If Paused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Paused": {
+      "main": [
+        [
+          {
+            "node": "Is Paused/Escalated?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Paused/Escalated?": {
+      "main": [
+        [
+          {
+            "node": "Save Msg (Paused)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Msg (Paused)": {
+      "main": [
+        [
+          {
+            "node": "Release Lock (Paused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Message": {
+      "main": [
+        [
+          {
+            "node": "Fetch History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch History": {
+      "main": [
+        [
+          {
+            "node": "RAG: Embed Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: Embed Question": {
+      "main": [
+        [
+          {
+            "node": "RAG: Match Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG: Match Chunks": {
+      "main": [
+        [
+          {
+            "node": "Build Claude Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Claude Request": {
+      "main": [
+        [
+          {
+            "node": "Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API": {
+      "main": [
+        [
+          {
+            "node": "Claude Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Success?": {
+      "main": [
+        [
+          {
+            "node": "Parse Claude Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fallback Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fallback Message": {
+      "main": [
+        [
+          {
+            "node": "Send Fallback DM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Fallback DM": {
+      "main": [
+        [
+          {
+            "node": "Save Fallback Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Fallback Reply": {
+      "main": [
+        [
+          {
+            "node": "Release Lock (Fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Claude Response": {
+      "main": [
+        [
+          {
+            "node": "Parse Error?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Error?": {
+      "main": [
+        [
+          {
+            "node": "Log Parse Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Offer Slots?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Parse Failure": {
+      "main": [
+        [
+          {
+            "node": "Is Offer Slots?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Offer Slots?": {
+      "main": [
+        [
+          {
+            "node": "Fetch Calendly Slots",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Execute Booking?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Calendly Slots": {
+      "main": [
+        [
+          {
+            "node": "Format Booking Options",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Booking Options": {
+      "main": [
+        [
+          {
+            "node": "Split Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Execute Booking?": {
+      "main": [
+        [
+          {
+            "node": "Execute Calendly Booking",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Calendly Booking": {
+      "main": [
+        [
+          {
+            "node": "Handle Booking Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Booking Result": {
+      "main": [
+        [
+          {
+            "node": "Split Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Reply": {
+      "main": [
+        [
+          {
+            "node": "Send Instagram Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Instagram Reply": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Assistant Reply": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead": {
+      "main": [
+        [
+          {
+            "node": "Upsert Lead HTTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Lead HTTP": {
+      "main": [
+        [
+          {
+            "node": "Escalate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate?": {
+      "main": [
+        [
+          {
+            "node": "Create Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release Lock (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Escalation": {
+      "main": [
+        [
+          {
+            "node": "Pause Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pause Lead": {
+      "main": [
+        [
+          {
+            "node": "Telegram Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Escalation": {
+      "main": [
+        [
+          {
+            "node": "Release Lock (Escalation)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "3bq70FE4nwVdRiQI",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

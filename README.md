@@ -78,11 +78,40 @@ project-maribel/
 
 ## Documentation
 
+### Setup & Architecture
 - [SETUP.md](SETUP.md) — Complete Meta Platform setup guide (start here)
 - [docs/project-maribel-spec-v2.md](docs/project-maribel-spec-v2.md) — Full V2 build specification
 - [docs/maribel-assumptions-resolution.md](docs/maribel-assumptions-resolution.md) — Technical assumptions and fixes
 - [docs/maribel-build-plan.md](docs/maribel-build-plan.md) — Phased build plan
 - [docs/meta-app-review-guide.md](docs/meta-app-review-guide.md) — Tips for passing Meta App Review
+
+### Operations & Testing
+- [docs/runbook.md](docs/runbook.md) — Operational runbook (monitoring, recovery, maintenance)
+- [docs/conversation-flow-examples.md](docs/conversation-flow-examples.md) — 13 example conversation flows
+- [docs/adversarial-test-cases.md](docs/adversarial-test-cases.md) — 20 red-team / safety test cases
+- [docs/development-mode-guide.md](docs/development-mode-guide.md) — Testing during Meta App Review
+
+### Utility Scripts
+- `scripts/test_webhook_verification.sh` — Test webhook GET verification handshake
+- `scripts/test_send_dm.sh` — Send a test DM via Graph API
+- `scripts/refresh_meta_token.sh` — Manual Meta token refresh
+- `scripts/export_n8n_workflows.sh` — Guide for exporting n8n workflows
+
+## n8n Workflows
+
+All 9 Maribel workflows are exported to `n8n/workflows/` as JSON:
+
+| # | Workflow | Trigger | Nodes |
+|---|---|---|---|
+| 1 | IG DM Handler | Webhook (`/ig-dm`) | 53 |
+| 2 | Comment-to-DM Trigger | Webhook (`/ig-comments`) | 16 |
+| 3 | Token Refresh | Schedule (every 50 days) | 9 |
+| 4 | Daily Analytics | Schedule (daily 8 AM EST) | 8 |
+| 5 | Stale Conversation Alert | Schedule (every 6 hours) | 5 |
+| 6 | Conversation Summarizer | Schedule (every 2 hours) | 11 |
+| 7 | Knowledge Re-embedder | Webhook (`/reembed-knowledge`) | 12 |
+| 8 | Telegram Callback Handler | Webhook (`/telegram-callback`) | 8 |
+| 9 | Global Error Handler | Error Trigger | 5 |
 
 ## License
 

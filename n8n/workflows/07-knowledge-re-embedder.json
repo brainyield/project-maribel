@@ -1,0 +1,442 @@
+{
+  "id": "LpMP1Y3J5m6kh616",
+  "name": "Maribel \u2014 Knowledge Re-embedder",
+  "active": false,
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        250,
+        500
+      ],
+      "parameters": {
+        "path": "reembed-knowledge",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "parse-input",
+      "name": "Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        470,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const body = $json.body || $json;\nconst chunkIds = body.chunk_ids || null;\nconst changedBy = body.changed_by || 'admin_ui';\n\nreturn [{\n  json: {\n    chunk_ids: chunkIds,\n    changed_by: changedBy,\n    is_targeted: Array.isArray(chunkIds) && chunkIds.length > 0\n  }\n}];"
+      }
+    },
+    {
+      "id": "fetch-chunks",
+      "name": "Fetch Chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        690,
+        500
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/knowledge_chunks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "select",
+              "value": "id,content,section_title,source_file"
+            },
+            {
+              "name": "is_active",
+              "value": "eq.true"
+            },
+            {
+              "name": "order",
+              "value": "id.asc"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "filter-chunks",
+      "name": "Filter & Batch Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        910,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const allChunks = $('Fetch Chunks').first().json;\nconst chunksArray = Array.isArray(allChunks) ? allChunks : [allChunks];\nconst input = $('Parse Input').first().json;\nconst targetIds = input.chunk_ids;\n\n// Filter to targeted chunks if specified\nlet chunks = chunksArray;\nif (input.is_targeted && Array.isArray(targetIds)) {\n  chunks = chunksArray.filter(c => targetIds.includes(c.id));\n}\n\nif (chunks.length === 0) {\n  return [{ json: { batches: [], total_chunks: 0, changed_by: input.changed_by } }];\n}\n\n// Batch into groups of 20 for OpenAI API\nconst batchSize = 20;\nconst batches = [];\nfor (let i = 0; i < chunks.length; i += batchSize) {\n  batches.push(chunks.slice(i, i + batchSize));\n}\n\nreturn batches.map(batch => ({\n  json: {\n    batch: batch,\n    chunk_ids: batch.map(c => c.id),\n    contents: batch.map(c => c.content),\n    total_chunks: chunks.length,\n    changed_by: input.changed_by\n  }\n}));"
+      }
+    },
+    {
+      "id": "embed-batch",
+      "name": "Embed Batch (OpenAI)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1130,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"text-embedding-3-small\",\n  \"input\": {{ JSON.stringify($json.contents) }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "update-embeddings",
+      "name": "Update Embeddings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const embedData = $json.data || [];\nconst batch = $('Filter & Batch Chunks').item.json.batch;\nconst changedBy = $('Filter & Batch Chunks').item.json.changed_by;\n\n// Build update operations\nconst updates = [];\nfor (let i = 0; i < batch.length; i++) {\n  const chunk = batch[i];\n  const embedding = embedData[i] ? embedData[i].embedding : null;\n  if (embedding) {\n    updates.push({\n      id: chunk.id,\n      embedding: '[' + embedding.join(',') + ']',\n      section_title: chunk.section_title\n    });\n  }\n}\n\nreturn [{\n  json: {\n    updates: updates,\n    count: updates.length,\n    changed_by: changedBy\n  }\n}];"
+      }
+    },
+    {
+      "id": "update-supabase",
+      "name": "Update Supabase Chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1570,
+        500
+      ],
+      "parameters": {
+        "jsCode": "// We need to update each chunk individually via REST API\n// Return items for the HTTP Request node to loop over\nconst updates = $json.updates || [];\nconst changedBy = $json.changed_by;\n\nreturn updates.map(u => ({\n  json: {\n    chunk_id: u.id,\n    embedding_str: u.embedding,\n    section_title: u.section_title,\n    changed_by: changedBy\n  }\n}));"
+      }
+    },
+    {
+      "id": "patch-chunk",
+      "name": "Patch Chunk Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1790,
+        500
+      ],
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/knowledge_chunks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $json.chunk_id }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"embedding\": \"{{ $json.embedding_str }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "log-version",
+      "name": "Log Version",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2010,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/knowledge_versions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chunk_id\": {{ $json.chunk_id }},\n  \"action\": \"reembed\",\n  \"changed_by\": \"{{ $json.changed_by }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "count-results",
+      "name": "Count Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2230,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst count = items.length;\nreturn [{\n  json: {\n    chunks_updated: count,\n    message: '\\u2705 Knowledge base re-embedded: ' + count + ' chunk(s) updated.'\n  }\n}];"
+      }
+    },
+    {
+      "id": "telegram-notify",
+      "name": "Telegram Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2450,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $env.TELEGRAM_CHAT_ID }}\",\n  \"text\": {{ JSON.stringify($json.message) }}\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "respond-webhook",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2670,
+        500
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, chunks_updated: $('Count Results').first().json.chunks_updated }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Input": {
+      "main": [
+        [
+          {
+            "node": "Fetch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Chunks": {
+      "main": [
+        [
+          {
+            "node": "Filter & Batch Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Batch Chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed Batch (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed Batch (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Update Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Update Supabase Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Supabase Chunks": {
+      "main": [
+        [
+          {
+            "node": "Patch Chunk Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch Chunk Embedding": {
+      "main": [
+        [
+          {
+            "node": "Log Version",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Version": {
+      "main": [
+        [
+          {
+            "node": "Count Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count Results": {
+      "main": [
+        [
+          {
+            "node": "Telegram Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Notify": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "3bq70FE4nwVdRiQI",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}

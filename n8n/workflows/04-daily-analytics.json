@@ -1,0 +1,350 @@
+{
+  "id": "DRDzNT4dVN6hPbG9",
+  "name": "Maribel \u2014 Daily Analytics",
+  "active": false,
+  "nodes": [
+    {
+      "id": "cron-trigger",
+      "name": "Daily 8 AM EST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        250,
+        500
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 13 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "cleanup-locks",
+      "name": "Cleanup Stale Locks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        470,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/cleanup_stale_locks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "query-metrics",
+      "name": "Query Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        690,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const yesterday = new Date();\nyesterday.setUTCDate(yesterday.getUTCDate() - 1);\nconst dateStr = yesterday.toISOString().split('T')[0];\nconst startOfDay = dateStr + 'T00:00:00Z';\nconst endOfDay = dateStr + 'T23:59:59Z';\n\nreturn [{\n  json: {\n    date: dateStr,\n    start_of_day: startOfDay,\n    end_of_day: endOfDay,\n    locks_cleaned: $json || 0\n  }\n}];"
+      }
+    },
+    {
+      "id": "fetch-conversations",
+      "name": "Fetch Conversation Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        910,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/rpc/get_analytics_summary",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_period\": \"day\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "fetch-counts",
+      "name": "Fetch Detail Counts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        910,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Prefer",
+              "value": "count=exact"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "created_at",
+              "value": "=gte.{{ $json.start_of_day }}"
+            },
+            {
+              "name": "created_at",
+              "value": "=lte.{{ $json.end_of_day }}"
+            },
+            {
+              "name": "select",
+              "value": "role,source"
+            },
+            {
+              "name": "limit",
+              "value": "0"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "fullResponse": true
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "build-analytics",
+      "name": "Build Analytics Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1130,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const dateStr = $('Query Metrics').first().json.date;\nconst locksClean = $('Query Metrics').first().json.locks_cleaned;\n\n// Get analytics summary if available\nlet stats;\ntry {\n  const summaryData = $('Fetch Conversation Metrics').first().json;\n  stats = Array.isArray(summaryData) ? summaryData[0] : summaryData;\n} catch(e) {\n  stats = {};\n}\n\nconst record = {\n  date: dateStr,\n  total_conversations: stats.total_conversations || 0,\n  new_leads: stats.new_leads || 0,\n  returning_leads: stats.returning_leads || 0,\n  messages_received: stats.messages_received || 0,\n  messages_sent: stats.messages_sent || 0,\n  escalations: stats.escalations || 0,\n  escalations_resolved: stats.escalations_resolved || 0,\n  calendly_bookings: stats.calendly_bookings || 0,\n  avg_response_time_seconds: stats.avg_response_time_seconds || null,\n  top_interests: stats.top_interests || [],\n  language_breakdown: stats.language_breakdown || {},\n  metadata_parse_failures: stats.metadata_parse_failures || 0,\n  duplicate_webhooks_detected: stats.duplicate_webhooks_detected || 0\n};\n\n// Build Telegram summary\nconst langBreak = record.language_breakdown;\nconst enCount = langBreak.en || 0;\nconst esCount = langBreak.es || 0;\nconst interests = (record.top_interests || []).join(', ') || 'none';\n\nconst telegramMsg = [\n  '\\ud83d\\udcca Maribel Daily Report \\u2014 ' + dateStr,\n  '',\n  '\\ud83d\\udcac Conversations: ' + record.total_conversations,\n  '\\ud83c\\udd95 New Leads: ' + record.new_leads,\n  '\\ud83d\\udd01 Returning: ' + record.returning_leads,\n  '\\ud83d\\udea8 Escalations: ' + record.escalations + ' (Resolved: ' + record.escalations_resolved + ')',\n  '\\ud83d\\udcde Calendly Bookings: ' + record.calendly_bookings,\n  '\\u23f1\\ufe0f Avg Response Time: ' + (record.avg_response_time_seconds ? record.avg_response_time_seconds + 's' : 'N/A'),\n  '\\ud83c\\udf10 Languages: EN: ' + enCount + ', ES: ' + esCount,\n  '\\ud83d\\udccb Top Interests: ' + interests,\n  '\\u26a0\\ufe0f Parse Failures: ' + record.metadata_parse_failures,\n  '\\ud83d\\udd04 Duplicate Webhooks: ' + record.duplicate_webhooks_detected,\n  '\\ud83d\\udd12 Stale Locks Cleaned: ' + locksClean\n].join('\\n');\n\nreturn [{\n  json: {\n    record: record,\n    telegram_message: telegramMsg\n  }\n}];"
+      }
+    },
+    {
+      "id": "insert-analytics",
+      "name": "Insert Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1350,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SUPABASE_MARIBEL_URL }}/rest/v1/ig_analytics_daily",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_MARIBEL_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates,return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.record) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "telegram-summary",
+      "name": "Telegram Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1570,
+        500
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"chat_id\": \"{{ $env.TELEGRAM_CHAT_ID }}\",\n  \"text\": {{ JSON.stringify($('Build Analytics Record').first().json.telegram_message) }}\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 8 AM EST": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Stale Locks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cleanup Stale Locks": {
+      "main": [
+        [
+          {
+            "node": "Query Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Metrics": {
+      "main": [
+        [
+          {
+            "node": "Fetch Conversation Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Detail Counts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Conversation Metrics": {
+      "main": [
+        [
+          {
+            "node": "Build Analytics Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Detail Counts": {
+      "main": [
+        [
+          {
+            "node": "Build Analytics Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Analytics Record": {
+      "main": [
+        [
+          {
+            "node": "Insert Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Analytics": {
+      "main": [
+        [
+          {
+            "node": "Telegram Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "3bq70FE4nwVdRiQI",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  }
+}
